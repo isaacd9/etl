@@ -55,6 +55,12 @@ pub struct IcebergClient {
 }
 
 impl IcebergClient {
+    /// New creates a client with the provided catalog implementation.
+    pub fn new<C: Catalog + 'static>(catalog: C) -> Self {
+        let c = Arc::new(catalog);
+        Self { catalog: c }
+    }
+
     /// Creates a new [`IcebergClient`] using a REST catalog configuration.
     ///
     /// This constructor initializes a client that connects to an Iceberg catalog
