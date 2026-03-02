@@ -128,10 +128,17 @@ impl IcebergClient {
     pub async fn create_namespace_if_missing(&self, namespace: &str) -> Result<(), iceberg::Error> {
         debug!(%namespace, "creating namespace");
         let namespace_ident = NamespaceIdent::from_strs(namespace.split('.'))?;
-        if !self.catalog.namespace_exists(&namespace_ident).await? {
-            self.catalog
-                .create_namespace(&namespace_ident, HashMap::new())
-                .await?;
+        match self
+            .catalog
+            .create_namespace(&namespace_ident, HashMap::new())
+            .await
+        {
+            Ok(_) => {}
+            // Some REST catalog implementations (e.g. tabulario/iceberg-rest)
+            // return 400 on `namespace_exists` probes, so we rely on idempotent
+            // create semantics and ignore "already exists" conflicts.
+            Err(err) if err.to_string().to_lowercase().contains("already exists") => {}
+            Err(err) => return Err(err),
         }
 
         Ok(())
@@ -179,18 +186,20 @@ impl IcebergClient {
     ) -> Result<(), iceberg::Error> {
         debug!(%table_name, %namespace, "creating table if missing");
         let namespace_ident = NamespaceIdent::from_strs(namespace.split('.'))?;
-        let table_ident = TableIdent::new(namespace_ident.clone(), table_name.clone());
-        if !self.catalog.table_exists(&table_ident).await? {
-            let iceberg_schema = postgres_to_iceberg_schema(column_schemas)?;
-            let creation = TableCreation::builder()
-                .name(table_name)
-                .schema(iceberg_schema)
-                .properties(Self::get_table_properties())
-                .build();
-            self.catalog
-                .create_table(&namespace_ident, creation)
-                .await?;
+        let iceberg_schema = postgres_to_iceberg_schema(column_schemas)?;
+        let creation = TableCreation::builder()
+            .name(table_name)
+            .schema(iceberg_schema)
+            .properties(Self::get_table_properties())
+            .build();
+        match self.catalog.create_table(&namespace_ident, creation).await {
+            Ok(_) => {}
+            // Same rationale as namespace creation: avoid an existence probe and
+            // treat conflict responses as success.
+            Err(err) if err.to_string().to_lowercase().contains("already exists") => {}
+            Err(err) => return Err(err),
         }
+
         Ok(())
     }
 
