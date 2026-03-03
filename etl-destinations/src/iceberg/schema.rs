@@ -78,18 +78,17 @@ fn create_iceberg_list_type(element_type: PrimitiveType, field_id: i32) -> Icebe
     IcebergType::List(list_type)
 }
 
-/// Converts a Postgres table schema to an Iceberg schema.
-pub fn postgres_to_iceberg_schema(
-    column_schemas: &[ColumnSchema],
-) -> Result<IcebergSchema, iceberg::Error> {
+/// Converts a slice of Postgres columns to Iceberg `NestedField`s with field IDs
+/// starting at `start_field_id`. Returns the fields and the next available field ID.
+pub fn postgres_columns_to_iceberg_fields(
+    columns: &[ColumnSchema],
+    start_field_id: i32,
+) -> Result<(Vec<Arc<NestedField>>, i32), iceberg::Error> {
     let mut fields = Vec::new();
-    let mut field_id = 1;
+    let mut field_id = start_field_id;
 
-    // Convert each column to Iceberg field
-    for column in column_schemas {
+    for column in columns {
         let field_type = if is_array_type(&column.typ) {
-            // For array types, we need to assign a unique field ID to the list element
-            // We increment field_id and use it for the element field
             field_id += 1;
             postgres_array_type_to_iceberg_type(&column.typ, field_id - 1)
         } else {
@@ -105,8 +104,15 @@ pub fn postgres_to_iceberg_schema(
         field_id += 1;
     }
 
-    let schema = IcebergSchema::builder().with_fields(fields).build()?;
+    Ok((fields, field_id))
+}
 
+/// Converts a Postgres table schema to an Iceberg schema.
+pub fn postgres_to_iceberg_schema(
+    column_schemas: &[ColumnSchema],
+) -> Result<IcebergSchema, iceberg::Error> {
+    let (fields, _) = postgres_columns_to_iceberg_fields(column_schemas, 1)?;
+    let schema = IcebergSchema::builder().with_fields(fields).build()?;
     Ok(schema)
 }
 
