@@ -12,5 +12,6 @@ pub use core::{
     DestinationNamespace, IcebergDestination, IcebergOperationType,
     table_name_to_iceberg_table_name,
 };
-pub use encoding::UNIX_EPOCH;
+pub use encoding::{UNIX_EPOCH, rows_to_record_batch};
 pub use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_SECRET_ACCESS_KEY};
+pub use schema::postgres_to_iceberg_schema;
