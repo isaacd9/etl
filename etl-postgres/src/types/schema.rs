@@ -93,7 +93,7 @@ impl ColumnSchema {
     /// relation messages. The reason for skipping the `primary` field is that if the replica
     /// identity of a table is set to full, the relation message sets all columns as primary
     /// key, irrespective of what the actual primary key in the table is.
-    fn partial_eq(&self, other: &ColumnSchema) -> bool {
+    pub fn partial_eq(&self, other: &ColumnSchema) -> bool {
         self.name == other.name && self.typ == other.typ && self.modifier == other.modifier
     }
 }

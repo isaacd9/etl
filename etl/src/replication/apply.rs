@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use etl_config::shared::PipelineConfig;
 use etl_postgres::replication::slots::EtlReplicationSlot;
-use etl_postgres::types::TableId;
+use etl_postgres::types::{TableId, TableSchema};
 use futures::StreamExt;
 use metrics::{counter, histogram};
 use postgres_replication::protocol;
@@ -1207,14 +1207,27 @@ where
         let event = parse_event_from_relation_message(start_lsn, remote_final_lsn, message)?;
 
         if !existing_table_schema.partial_eq(&event.table_schema) {
-            let error = TableReplicationError::with_solution(
-                table_id,
-                format!("The schema for table {table_id} has changed during streaming"),
-                "ETL doesn't support schema changes at this point in time, rollback the schema",
-                RetryPolicy::ManualRetry,
-            );
+            // Check if this is an additive schema change (new columns appended).
+            if is_additive_schema_change(&existing_table_schema, &event.table_schema) {
+                info!(
+                    table_id = %table_id,
+                    old_columns = existing_table_schema.column_schemas.len(),
+                    new_columns = event.table_schema.column_schemas.len(),
+                    "accepting additive schema change, updating schema store"
+                );
+                self.schema_store
+                    .store_table_schema(event.table_schema.clone())
+                    .await?;
+            } else {
+                let error = TableReplicationError::with_solution(
+                    table_id,
+                    format!("The schema for table {table_id} has changed during streaming"),
+                    "Only additive schema changes (ADD COLUMN) are supported. Rollback the schema change.",
+                    RetryPolicy::ManualRetry,
+                );
 
-            return Ok(HandleMessageResult::finish_batch_and_exclude_event(error));
+                return Ok(HandleMessageResult::finish_batch_and_exclude_event(error));
+            }
         }
 
         Ok(HandleMessageResult::return_event(Event::Relation(event)))
@@ -1488,6 +1501,23 @@ where
         .await?
         .into_iter()
         .filter(|(_, state)| !state.as_type().is_done()))
+}
+
+/// Checks whether a schema change is purely additive (new columns appended at the end).
+/// Uses `ColumnSchema::partial_eq` which compares name, type, and modifier (skipping
+/// nullable and primary, consistent with how relation messages are compared).
+fn is_additive_schema_change(old: &TableSchema, new: &TableSchema) -> bool {
+    if new.column_schemas.len() <= old.column_schemas.len() {
+        return false;
+    }
+    if old.id != new.id || old.name != new.name {
+        return false;
+    }
+    // All existing columns must match (using the same partial_eq that skips nullable/primary)
+    old.column_schemas
+        .iter()
+        .zip(new.column_schemas.iter())
+        .all(|(old_col, new_col)| old_col.partial_eq(new_col))
 }
 
 /// Functions specific to the apply worker.
