@@ -74,6 +74,28 @@ impl IcebergClient {
         })
     }
 
+    /// Creates a new [`IcebergClient`] using a REST catalog with AWS SigV4 authentication.
+    ///
+    /// This constructor initializes a client that connects to an Iceberg catalog
+    /// through the REST catalog protocol with AWS SigV4 request signing. This is
+    /// required for AWS-managed catalog services such as S3 Tables.
+    pub async fn new_with_rest_catalog_sigv4(
+        catalog_uri: String,
+        warehouse_name: String,
+        mut props: HashMap<String, String>,
+        aws_config: aws_types::SdkConfig,
+    ) -> Result<Self, iceberg::Error> {
+        props.insert(REST_CATALOG_PROP_URI.to_string(), catalog_uri);
+        props.insert(REST_CATALOG_PROP_WAREHOUSE.to_string(), warehouse_name);
+
+        let builder = RestCatalogBuilder::default().with_aws_config(aws_config);
+        let catalog = builder.load("RestCatalog", props).await?;
+
+        Ok(IcebergClient {
+            catalog: Arc::new(catalog),
+        })
+    }
+
     /// Creates a new [`IcebergClient`] configured for Supabase storage integration.
     ///
     /// This constructor creates a client specifically configured to work with Supabase's
